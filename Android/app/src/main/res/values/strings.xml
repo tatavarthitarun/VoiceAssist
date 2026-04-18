@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">VoiceAssist</string>
+    <string name="accessibility_service_description">VoiceAssist uses accessibility access to listen for volume button presses and control apps on your behalf using voice commands.</string>
+</resources>
