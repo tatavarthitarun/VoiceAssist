@@ -7,6 +7,10 @@ Thumbs.db
 *.iml
 .vscode/
 
+# === Private planning docs ===
+.lifeos
+.kiro/
+
 # === Android ===
 Android/.gradle/
 Android/.idea/
