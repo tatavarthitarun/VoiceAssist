@@ -1,14 +1,21 @@
 package com.tatav.voiceassist
 
+import android.Manifest
+import android.content.ComponentName
+import android.content.pm.PackageManager
 import android.os.Bundle
+import android.provider.Settings
+import android.text.TextUtils
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.dropUnlessResumed
 import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
+import com.tatav.voiceassist.service.VoiceAssistService
 import com.tatav.voiceassist.ui.home.HomeScreen
 import com.tatav.voiceassist.ui.home.HomeViewModel
 import com.tatav.voiceassist.ui.navigation.HomeRoute
@@ -30,9 +37,11 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
+        val startRoute = if (isSetupComplete()) HomeRoute else SplashRoute
+
         setContent {
             VoiceAssistTheme {
-                val backStack = rememberNavBackStack(SplashRoute)
+                val backStack = rememberNavBackStack(startRoute)
 
                 NavDisplay(
                     backStack = backStack,
@@ -89,5 +98,27 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    private fun isSetupComplete(): Boolean {
+        val hasAccessibility = isAccessibilityServiceEnabled()
+        val hasMic = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        val hasContacts = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
+        val hasPhone = ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED
+        return hasAccessibility && hasMic && hasContacts && hasPhone
+    }
+
+    private fun isAccessibilityServiceEnabled(): Boolean {
+        val expectedComponent = ComponentName(this, VoiceAssistService::class.java)
+        val enabledServices = Settings.Secure.getString(
+            contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+        ) ?: return false
+        val splitter = TextUtils.SimpleStringSplitter(':')
+        splitter.setString(enabledServices)
+        while (splitter.hasNext()) {
+            val component = ComponentName.unflattenFromString(splitter.next())
+            if (component == expectedComponent) return true
+        }
+        return false
     }
 }

@@ -81,7 +81,12 @@ class VoiceAssistService : AccessibilityService() {
         if (_state.value == ServiceState.IDLE) {
             Log.d(TAG, "Double-tap detected → LISTENING")
             _state.value = ServiceState.LISTENING
-            speechManager.startListening()
+            // Immediate haptic feedback
+            speechManager.vibrate()
+            scope.launch {
+                speechManager.speak("Listening")
+                speechManager.startListening()
+            }
         }
     }
 

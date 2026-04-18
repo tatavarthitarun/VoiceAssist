@@ -1,7 +1,9 @@
 package com.tatav.voiceassist.speech
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -11,6 +13,7 @@ import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
+import androidx.core.content.ContextCompat
 import androidx.core.content.getSystemService
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -55,11 +58,28 @@ class SpeechManager @Inject constructor(
         }
     }
 
-    fun startListening() {
+    fun vibrate() {
         val vibrator = context.getSystemService<Vibrator>()
         vibrator?.vibrate(
             VibrationEffect.createOneShot(100, VibrationEffect.DEFAULT_AMPLITUDE)
         )
+    }
+
+    fun startListening() {
+        // Check microphone permission first
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            Log.e(TAG, "RECORD_AUDIO permission not granted!")
+            _events.tryEmit(SpeechEvent.Error("Microphone permission not granted. Please open VoiceAssist and grant it."))
+            return
+        }
+
+        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+            Log.e(TAG, "Speech recognition not available on this device")
+            _events.tryEmit(SpeechEvent.Error("Speech recognition not available on this device."))
+            return
+        }
 
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(
@@ -69,6 +89,7 @@ class SpeechManager @Inject constructor(
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
         }
+        Log.d(TAG, "Starting speech recognition...")
         recognizer?.startListening(intent)
     }
 
@@ -134,12 +155,18 @@ class SpeechManager @Inject constructor(
         }
 
         override fun onError(error: Int) {
+            Log.e(TAG, "SpeechRecognizer error code: $error")
             val msg = when (error) {
                 SpeechRecognizer.ERROR_NO_MATCH -> "I didn't catch that."
                 SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "I didn't hear anything."
-                SpeechRecognizer.ERROR_AUDIO -> "Audio error."
-                SpeechRecognizer.ERROR_NETWORK -> "Network error."
-                else -> "Speech recognition error."
+                SpeechRecognizer.ERROR_AUDIO -> "Audio error. Check microphone permission."
+                SpeechRecognizer.ERROR_NETWORK -> "Network error. Check internet connection."
+                SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network timeout."
+                SpeechRecognizer.ERROR_CLIENT -> "Client error. Try again."
+                SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Microphone permission not granted. Please open VoiceAssist and grant it."
+                SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Speech recognizer is busy. Try again."
+                SpeechRecognizer.ERROR_SERVER -> "Server error."
+                else -> "Speech recognition error. Code: $error"
             }
             _events.tryEmit(SpeechEvent.Error(msg))
         }

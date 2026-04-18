@@ -44,6 +44,17 @@ class SetupViewModel @Inject constructor(
                         && hasPermission(Manifest.permission.ANSWER_PHONE_CALLS),
             )
         }
+        // Auto-advance if current step's permission is already granted
+        autoAdvance()
+    }
+
+    private fun autoAdvance() {
+        val current = _state.value
+        when (current.step) {
+            1 -> if (current.accessibilityEnabled) _state.update { it.copy(step = 2) }
+            2 -> if (current.micGranted) _state.update { it.copy(step = 3) }
+            // Step 3 doesn't auto-advance — user taps "Finish Setup"
+        }
     }
 
     fun nextStep() {
