@@ -10,6 +10,12 @@
     <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- Package visibility for WhatsApp deep links and intents -->
+    <queries>
+        <package android:name="com.whatsapp" />
+        <package android:name="com.whatsapp.w4b" />
+    </queries>
+
     <application
         android:name=".VoiceAssistApp"
         android:allowBackup="true"

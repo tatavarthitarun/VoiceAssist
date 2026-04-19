@@ -6,7 +6,10 @@ import android.media.AudioManager
 import android.util.Log
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
 import androidx.core.content.getSystemService
+import com.tatav.voiceassist.action.AccessibilityBridge
+import com.tatav.voiceassist.action.WhatsAppHandler
 import com.tatav.voiceassist.data.SettingsRepository
 import com.tatav.voiceassist.speech.SpeechEvent
 import com.tatav.voiceassist.speech.SpeechManager
@@ -24,10 +27,12 @@ import javax.inject.Inject
 enum class ServiceState { IDLE, LISTENING, PROCESSING, CONFIRMING, EXECUTING }
 
 @AndroidEntryPoint
-class VoiceAssistService : AccessibilityService() {
+class VoiceAssistService : AccessibilityService(), AccessibilityBridge {
 
     companion object {
         private const val TAG = "VoiceAssistService"
+        private const val WHATSAPP_PACKAGE = "com.whatsapp"
+        private const val WHATSAPP_BUSINESS_PACKAGE = "com.whatsapp.w4b"
 
         private val _serviceActive = MutableStateFlow(false)
         val serviceActive: StateFlow<Boolean> = _serviceActive.asStateFlow()
@@ -36,6 +41,7 @@ class VoiceAssistService : AccessibilityService() {
     @Inject lateinit var speechManager: SpeechManager
     @Inject lateinit var conversationManager: ConversationManager
     @Inject lateinit var settingsRepository: SettingsRepository
+    @Inject lateinit var whatsAppHandler: WhatsAppHandler
 
     private lateinit var keyDetector: KeyEventDetector
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -44,6 +50,9 @@ class VoiceAssistService : AccessibilityService() {
         super.onServiceConnected()
         Log.d(TAG, "Service connected")
         _serviceActive.value = true
+
+        // Register this service as the accessibility bridge for WhatsApp automation
+        whatsAppHandler.attachBridge(this)
 
         conversationManager.attachScope(scope)
 
@@ -113,7 +122,77 @@ class VoiceAssistService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // Used in M2+ for WhatsApp/Phone automation
+        event ?: return
+
+        when (event.eventType) {
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
+                val pkg = event.packageName?.toString() ?: return
+                if (pkg == WHATSAPP_PACKAGE || pkg == WHATSAPP_BUSINESS_PACKAGE) {
+                    val className = event.className?.toString() ?: ""
+                    Log.d(TAG, "WhatsApp activity: $className")
+                    whatsAppHandler.currentWhatsAppActivity = className
+
+                    // Auto-detect incoming WhatsApp VoIP call (full-screen)
+                    if ((className.contains("VoipActivity", ignoreCase = true)
+                                || className.contains("voipcalling", ignoreCase = true))
+                        && conversationManager.state.value == ServiceState.IDLE
+                    ) {
+                        Log.d(TAG, "Incoming WhatsApp VoIP call screen detected")
+                        val callerName = whatsAppHandler.extractCallerName(this) ?: "unknown"
+                        Log.d(TAG, "Caller name extracted: $callerName")
+                        conversationManager.handleIncomingCall(callerName)
+                    }
+                }
+            }
+
+            AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED -> {
+                val pkg = event.packageName?.toString() ?: return
+                if ((pkg == WHATSAPP_PACKAGE || pkg == WHATSAPP_BUSINESS_PACKAGE)
+                    && conversationManager.state.value == ServiceState.IDLE
+                ) {
+                    // Check notification text for incoming call indicators
+                    val allText = event.text?.mapNotNull { it?.toString() } ?: emptyList()
+                    val combined = allText.joinToString(" ").lowercase()
+                    if (combined.contains("incoming voice call")
+                        || combined.contains("incoming video call")
+                        || combined.contains("incoming call")
+                    ) {
+                        Log.d(TAG, "Incoming WhatsApp call notification detected: $allText")
+                        // Extract caller name: typically the first text element that isn't the call type
+                        val callerName = allText.firstOrNull { line ->
+                            val lower = line.lowercase()
+                            !lower.contains("incoming voice call")
+                                    && !lower.contains("incoming video call")
+                                    && !lower.contains("incoming call")
+                                    && line.isNotBlank()
+                        } ?: "unknown"
+                        Log.d(TAG, "Caller name from notification: $callerName")
+                        conversationManager.handleIncomingCall(callerName)
+                    }
+                }
+            }
+
+            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
+                // Heads-up notification popup triggers content changes — detect call buttons
+                if (conversationManager.state.value == ServiceState.IDLE) {
+                    val pkg = event.packageName?.toString()
+                    if (pkg == WHATSAPP_PACKAGE || pkg == WHATSAPP_BUSINESS_PACKAGE) {
+                        // Check all windows for call notification elements
+                        val hasCallNotification = getAllRootNodes().any { root ->
+                            whatsAppHandler.hasIncomingCallNotificationButtons(root)
+                        }
+                        if (hasCallNotification) {
+                            Log.d(TAG, "Incoming WhatsApp call heads-up popup detected via content change")
+                            val callerName = getAllRootNodes().firstNotNullOfOrNull { root ->
+                                whatsAppHandler.extractCallerNameFromNotification(root)
+                            } ?: "unknown"
+                            Log.d(TAG, "Caller name from heads-up: $callerName")
+                            conversationManager.handleIncomingCall(callerName)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     override fun onInterrupt() {
@@ -122,14 +201,51 @@ class VoiceAssistService : AccessibilityService() {
 
     override fun onUnbind(intent: Intent?): Boolean {
         _serviceActive.value = false
+        whatsAppHandler.detachBridge()
         return super.onUnbind(intent)
     }
 
     override fun onDestroy() {
         _serviceActive.value = false
+        whatsAppHandler.detachBridge()
         if (::keyDetector.isInitialized) keyDetector.destroy()
         scope.cancel()
         speechManager.destroy()
         super.onDestroy()
+    }
+
+    // ── AccessibilityBridge implementation ───────────────────────────────────
+
+    override fun getRootNode(): AccessibilityNodeInfo? = rootInActiveWindow
+
+    override fun getAllRootNodes(): List<AccessibilityNodeInfo> {
+        val nodes = mutableListOf<AccessibilityNodeInfo>()
+        for (window in windows) {
+            window.root?.let { nodes.add(it) }
+        }
+        return nodes
+    }
+
+    override fun doGlobalAction(action: Int): Boolean = performGlobalAction(action)
+
+    override fun dispatchSwipeGesture(startX: Float, startY: Float, endX: Float, endY: Float, durationMs: Long): Boolean {
+        val path = android.graphics.Path().apply {
+            moveTo(startX, startY)
+            lineTo(endX, endY)
+        }
+        val gesture = android.accessibilityservice.GestureDescription.Builder()
+            .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, durationMs))
+            .build()
+        Log.d(TAG, "Dispatching swipe gesture: ($startX,$startY) → ($endX,$endY), duration=${durationMs}ms")
+        val result = dispatchGesture(gesture, object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: android.accessibilityservice.GestureDescription?) {
+                Log.d(TAG, "Swipe gesture COMPLETED")
+            }
+            override fun onCancelled(gestureDescription: android.accessibilityservice.GestureDescription?) {
+                Log.w(TAG, "Swipe gesture CANCELLED")
+            }
+        }, null)
+        Log.d(TAG, "dispatchGesture returned: $result")
+        return result
     }
 }
