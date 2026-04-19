@@ -1,49 +1,45 @@
 package com.tatav.voiceassist.ui.settings
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.tatav.voiceassist.data.AppSettings
+import com.tatav.voiceassist.data.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-data class SettingsState(
-    val doubleTapSpeedMs: Float = 400f,
-    val alwaysConfirm: Boolean = true,
-    val voiceVolume: Float = 1f,
-    val playSoundOnActivation: Boolean = true,
-    val vibrateOnActivation: Boolean = true,
-    val showVisualOverlay: Boolean = true,
-)
-
 @HiltViewModel
-class SettingsViewModel @Inject constructor() : ViewModel() {
+class SettingsViewModel @Inject constructor(
+    private val settingsRepository: SettingsRepository,
+) : ViewModel() {
 
-    private val _state = MutableStateFlow(SettingsState())
-    val state: StateFlow<SettingsState> = _state.asStateFlow()
+    val state: StateFlow<AppSettings> = settingsRepository.settings
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AppSettings())
 
     fun setDoubleTapSpeed(ms: Float) {
-        _state.update { it.copy(doubleTapSpeedMs = ms) }
+        viewModelScope.launch { settingsRepository.setDoubleTapSpeed(ms) }
     }
 
     fun setAlwaysConfirm(enabled: Boolean) {
-        _state.update { it.copy(alwaysConfirm = enabled) }
+        viewModelScope.launch { settingsRepository.setAlwaysConfirm(enabled) }
     }
 
     fun setVoiceVolume(volume: Float) {
-        _state.update { it.copy(voiceVolume = volume) }
+        viewModelScope.launch { settingsRepository.setVoiceVolume(volume) }
     }
 
     fun setPlaySound(enabled: Boolean) {
-        _state.update { it.copy(playSoundOnActivation = enabled) }
+        viewModelScope.launch { settingsRepository.setPlaySound(enabled) }
     }
 
     fun setVibrate(enabled: Boolean) {
-        _state.update { it.copy(vibrateOnActivation = enabled) }
+        viewModelScope.launch { settingsRepository.setVibrate(enabled) }
     }
 
     fun setShowOverlay(enabled: Boolean) {
-        _state.update { it.copy(showVisualOverlay = enabled) }
+        viewModelScope.launch { settingsRepository.setShowOverlay(enabled) }
     }
 }

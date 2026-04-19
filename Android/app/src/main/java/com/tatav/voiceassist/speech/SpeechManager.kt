@@ -15,6 +15,7 @@ import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.core.content.getSystemService
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -27,11 +28,13 @@ import kotlin.coroutines.resume
 
 @Singleton
 class SpeechManager @Inject constructor(
-    private val context: Context
+    @ApplicationContext private val context: Context
 ) {
     companion object {
         private const val TAG = "SpeechManager"
     }
+
+    var language: String = "en-US"
 
     private val _events = MutableSharedFlow<SpeechEvent>(extraBufferCapacity = 16)
     val events: SharedFlow<SpeechEvent> = _events.asSharedFlow()
@@ -86,7 +89,7 @@ class SpeechManager @Inject constructor(
                 RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                 RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
             )
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
         }
         Log.d(TAG, "Starting speech recognition...")

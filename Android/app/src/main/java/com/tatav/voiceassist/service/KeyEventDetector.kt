@@ -36,4 +36,9 @@ class KeyEventDetector(
         }, thresholdMs)
         return true
     }
+
+    fun destroy() {
+        handler.removeCallbacksAndMessages(null)
+        waitingForSecondTap = false
+    }
 }
